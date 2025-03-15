@@ -1,0 +1,221 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'CloudFormation template to create two VPCs with VPC Peering, public subnets, instances, internet gateways, and security groups'
+
+Resources:
+  VPC1:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: VPC1
+
+  VPC2:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.1.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: VPC2
+
+  InternetGateway1:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: IGW1
+
+  InternetGateway2:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: IGW2
+
+  AttachIGW1:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC1
+      InternetGatewayId: !Ref InternetGateway1
+
+  AttachIGW2:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC2
+      InternetGatewayId: !Ref InternetGateway2
+
+  PublicRouteTableVPC1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC1
+      Tags:
+        - Key: Name
+          Value: PublicRouteTableVPC1
+
+  PublicRouteTableVPC2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC2
+      Tags:
+        - Key: Name
+          Value: PublicRouteTableVPC2
+
+  RouteVPC1ToInternet:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PublicRouteTableVPC1
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway1
+
+  RouteVPC2ToInternet:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PublicRouteTableVPC2
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway2
+
+  VPCPeering:
+    Type: AWS::EC2::VPCPeeringConnection
+    Properties:
+      VpcId: !Ref VPC1
+      PeerVpcId: !Ref VPC2
+      Tags:
+        - Key: Name
+          Value: VPCPeeringConnection
+
+  RouteVPC1ToVPC2:
+    Type: AWS::EC2::Route
+    DependsOn: VPCPeering
+    Properties:
+      RouteTableId: !Ref PublicRouteTableVPC1
+      DestinationCidrBlock: 10.1.0.0/16
+      VpcPeeringConnectionId: !Ref VPCPeering
+
+  RouteVPC2ToVPC1:
+    Type: AWS::EC2::Route
+    DependsOn: VPCPeering
+    Properties:
+      RouteTableId: !Ref PublicRouteTableVPC2
+      DestinationCidrBlock: 10.0.0.0/16
+      VpcPeeringConnectionId: !Ref VPCPeering
+
+  PublicSubnetVPC1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC1
+      CidrBlock: 10.0.1.0/24
+      MapPublicIpOnLaunch: true
+      AvailabilityZone: !Select [ 0, !GetAZs "" ]
+      Tags:
+        - Key: Name
+          Value: PublicSubnetVPC1
+
+  PublicSubnetVPC2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC2
+      CidrBlock: 10.1.1.0/24
+      MapPublicIpOnLaunch: true
+      AvailabilityZone: !Select [ 1, !GetAZs "" ]
+      Tags:
+        - Key: Name
+          Value: PublicSubnetVPC2
+
+  PublicSubnetRouteTableAssociation1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetVPC1
+      RouteTableId: !Ref PublicRouteTableVPC1
+
+  PublicSubnetRouteTableAssociation2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetVPC2
+      RouteTableId: !Ref PublicRouteTableVPC2
+
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow SSH and Peering Traffic
+      VpcId: !Ref VPC1
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: -1
+          FromPort: -1
+          ToPort: -1
+          CidrIp: 10.1.0.0/16  # Allow all traffic from VPC2
+      Tags:
+        - Key: Name
+          Value: SSH-SG
+          
+  SecurityGroup2:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow SSH and Peering Traffic
+      VpcId: !Ref VPC2
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: -1
+          FromPort: -1
+          ToPort: -1
+          CidrIp: 10.0.0.0/16  # Allow all traffic from VPC1
+      Tags:
+        - Key: Name
+          Value: SSH-SG2
+          
+  EC2Instance1:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t2.micro
+      ImageId: ami-01eb4eefd88522422
+      KeyName: CloudFormationKeyPair
+      SubnetId: !Ref PublicSubnetVPC1
+      SecurityGroupIds:
+        - !Ref SecurityGroup
+      Tags:
+        - Key: Name
+          Value: Instance1
+
+  EC2Instance2:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t2.micro
+      ImageId: ami-01eb4eefd88522422
+      KeyName: CloudFormationKeyPair
+      SubnetId: !Ref PublicSubnetVPC2
+      SecurityGroupIds:
+        - !Ref SecurityGroup2
+      Tags:
+        - Key: Name
+          Value: Instance2
+
+Outputs:
+  VPC1ID:
+    Description: VPC1 ID
+    Value: !Ref VPC1
+
+  VPC2ID:
+    Description: VPC2 ID
+    Value: !Ref VPC2
+
+  VPCPeeringConnectionID:
+    Description: VPC Peering Connection ID
+    Value: !Ref VPCPeering
+
+  EC2Instance1PublicIP:
+    Description: Public IP of EC2 Instance in VPC1
+    Value: !GetAtt EC2Instance1.PublicIp
+
+  EC2Instance2PublicIP:
+    Description: Public IP of EC2 Instance in VPC2
+    Value: !GetAtt EC2Instance2.PublicIp
