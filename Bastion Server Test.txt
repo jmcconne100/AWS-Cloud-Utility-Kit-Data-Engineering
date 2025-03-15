@@ -1,0 +1,62 @@
+🛠 Step 1: Create an AWS Key Pair Generate the key pair in AWS:
+
+Go to AWS Management Console → EC2 → Key Pairs.
+
+Click Create key pair.
+
+Name it CloudFormationKeyPair.
+
+Select .pem format.
+
+Click Create Key Pair (it will automatically download CloudFormationKeyPair.pem).
+
+Move the .pem file to a safe location on your machine, e.g.:
+
+"C:\Users\YourUsername\KeyPairs\CloudFormationKeyPair.pem"
+
+🔧 Step 2: Convert .pem to .ppk for PuTTY
+
+Open PuTTYgen (installed with PuTTY).
+Click Load and select your .pem file.
+Click Save private key (ignore passphrase warning).
+Save it as CloudFormationKeyPair.ppk in the same directory.
+📜 Step 3: Create & Deploy the CloudFormation Template
+
+Open AWS Management Console → CloudFormation.
+Click Create Stack → With new resources (standard).
+Upload the CloudFormation YAML file (with VPC, Public/Private Subnets, NACL, Security Groups, EC2 instances).
+Click Next and provide:
+Stack Name (e.g., MyVPCStack).
+Leave default values for other options.
+Click Create Stack and wait for deployment.
+📤 Step 4: Copy the .pem File to the Public EC2 Instance
+
+Open PowerShell on your local machine.
+
+Use pscp (PuTTY SCP) to transfer the .pem file to the public instance:
+
+"pscp -i C:\Users\YourUsername\KeyPairs\CloudFormationKeyPair.ppk C:\Users\YourUsername\KeyPairs\CloudFormationKeyPair.pem ec2-user@<PUBLIC_IP>:/home/ec2-user/"
+
+Replace <PUBLIC_IP> with the actual public IP of your public instance.
+
+🔐 Step 5: SSH into the Public Instance & Secure the Key
+
+Open PuTTY and connect to the public EC2 instance:
+
+"Host Name: ec2-user@<PUBLIC_IP>"
+
+Auth (SSH): Browse for CloudFormationKeyPair.ppk
+
+Once inside, protect the .pem file:
+
+"chmod 400 /home/ec2-user/CloudFormationKeyPair.pem"
+
+🔑 Step 6: SSH into the Private Instance
+
+From inside the public EC2 instance, SSH into the private EC2 instance:
+
+"ssh -i /home/ec2-user/CloudFormationKeyPair.pem ec2-user@<PRIVATE_IP>"
+
+Replace <PRIVATE_IP> with the private IP of your private EC2 instance.
+
+Now, you're inside your private instance! 🎉
