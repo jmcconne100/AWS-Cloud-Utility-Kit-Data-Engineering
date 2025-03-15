@@ -1,0 +1,26 @@
+# Quick Commands to Test Connectivity of the CloudFormation Template
+
+# 1. Check if S3 access works (should succeed)
+aws s3 ls
+
+# 2. Check if S3 access works explicitly via VPC Endpoint (should succeed)
+aws s3 ls --endpoint-url https://s3.us-west-1.amazonaws.com
+
+# 3. Test internet access (should fail)
+curl -I https://www.google.com
+
+# 4. Check DNS resolution for S3 (should return public IPs, but traffic still routes privately)
+nslookup s3.us-west-1.amazonaws.com
+
+# 5. Run traceroute to check if traffic is private (should return * * * due to blocked ICMP)
+traceroute s3.us-west-1.amazonaws.com
+
+# 6. Check active network connections to see if S3 is accessed via private VPC
+netstat -anp | grep ':443'
+
+# 7. Upload a test file to S3 (should succeed)
+echo "test data" > testfile.txt
+aws s3 cp testfile.txt s3://my-unique-bucket-<your-account-number>/
+
+# 8. Verify uploaded file in S3
+aws s3 ls s3://my-unique-bucket-<your-account-number>/

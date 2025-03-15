@@ -1,0 +1,50 @@
+**How to Verify Traffic is Using AWS VPC Peering**
+
+This guide provides steps to confirm that network traffic between instances in peered VPCs is routed over AWS's internal network and not the public internet.
+
+### **1. Test Network Connectivity with Ping**
+Run the following command on one instance to check connectivity to another instance in the peered VPC:
+
+
+```
+ping <EC2InstancePrivateIP>
+```
+
+- Expected result: Responses with low latency (typically **1-2ms** within the same region).
+- If there is **100% packet loss**, check **VPC Peering status, security groups, and route tables**.
+
+### **2. Verify Routing Path with Traceroute**
+To ensure traffic is not going over the public internet, use `traceroute` (Linux/macOS) or `tracert` (Windows):
+
+```
+traceroute <EC2InstancePrivateIP>
+```
+
+or
+
+```
+tracert <EC2InstancePrivateIP>
+```
+- Expected result: **A single hop** within the AWS private network.
+- If you see multiple hops outside AWS, check **route tables and VPC Peering connection**.
+
+### **3. Confirm AWS Internal Routing with `ip route`**
+On the instance, check its routing table to ensure AWS handles traffic internally:
+
+```
+ip route
+```
+
+- Expected result: A route for the peered VPC CIDR block (e.g., `10.1.0.0/16 via local interface`).
+
+### **4. Test SSH Over Private IP**
+If the setup is correct, SSH should work **without a public IP**:
+
+```
+ssh ec2-user@<EC2InstancePrivateIP>
+```
+
+- If SSH fails, check **security groups and inbound rules**.
+
+These tests confirm that traffic remains within AWS and does not traverse the public internet.
+
