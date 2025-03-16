@@ -1,0 +1,112 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CloudFormation template for a "Hello World" Lambda that writes to S3 and logs to CloudWatch
+
+Resources:
+  # S3 Bucket
+  MyS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "my-lambda-bucket-${AWS::AccountId}-${AWS::Region}"
+
+  # IAM Role for Lambda
+  MyLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: MyLambdaExecutionRole
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 
+                - lambda.amazonaws.com
+            Action: 
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: LambdaS3Access
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !GetAtt MyS3Bucket.Arn
+                  - !Sub "${MyS3Bucket.Arn}/*"
+        - PolicyName: LambdaCloudWatchLogs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*"
+
+  # Lambda Function
+  MyLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: HelloWorldLambda
+      Handler: index.lambda_handler
+      Runtime: python3.9
+      Role: !GetAtt MyLambdaRole.Arn
+      MemorySize: 128
+      Timeout: 10
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref MyS3Bucket
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import logging
+          import datetime
+          import os
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          s3 = boto3.client("s3")
+          bucket_name = os.environ["BUCKET_NAME"]
+
+          def lambda_handler(event, context):
+              message = "Hello, World!"
+              timestamp = datetime.datetime.utcnow().isoformat()
+              file_key = f"hello-world-{timestamp}.txt"
+
+              # Write to S3
+              try:
+                  s3.put_object(
+                      Bucket=bucket_name,
+                      Key=file_key,
+                      Body=message
+                  )
+                  logger.info(f"Successfully wrote message to {file_key} in {bucket_name}")
+              except Exception as e:
+                  logger.error(f"Error writing to S3: {str(e)}")
+                  return {
+                      "statusCode": 500,
+                      "body": json.dumps(f"Error writing to S3: {str(e)}")
+                  }
+
+              return {
+                  "statusCode": 200,
+                  "body": json.dumps({
+                      "message": message,
+                      "s3_file": file_key,
+                      "bucket": bucket_name
+                  })
+              }
+
+Outputs:
+  LambdaFunctionName:
+    Description: Name of the Lambda function
+    Value: !Ref MyLambdaFunction
+
+  S3BucketName:
+    Description: S3 Bucket used by the Lambda function
+    Value: !Ref MyS3Bucket
