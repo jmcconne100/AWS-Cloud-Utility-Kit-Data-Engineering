@@ -1,0 +1,156 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: "CloudFormation Template for Kinesis Data Stream, Firehose, and S3"
+
+Resources:
+  ## 🔹 S3 Bucket for Storing JSON Data
+  KinesisS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      BucketName: !Sub "kinesis-firehose-bucket-${AWS::AccountId}-${AWS::Region}"
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: True
+        BlockPublicPolicy: True
+        IgnorePublicAcls: True
+        RestrictPublicBuckets: True
+
+  ## 🔹 Kinesis Data Stream (1 Shard)
+  KinesisDataStream:
+    Type: AWS::Kinesis::Stream
+    Properties:
+      Name: "KinesisDataStream"
+      ShardCount: 1 # Increase if higher throughput is needed
+
+  ## 🔹 Kinesis Firehose Delivery Stream
+  KinesisFirehose:
+    Type: AWS::KinesisFirehose::DeliveryStream
+    Properties:
+      DeliveryStreamName: "KinesisFirehoseStream"
+      DeliveryStreamType: KinesisStreamAsSource
+      KinesisStreamSourceConfiguration:
+        KinesisStreamARN: !GetAtt KinesisDataStream.Arn
+        RoleARN: !GetAtt FirehoseIAMRole.Arn
+      S3DestinationConfiguration:
+        BucketARN: !GetAtt KinesisS3Bucket.Arn
+        RoleARN: !GetAtt FirehoseIAMRole.Arn
+        BufferingHints:
+          IntervalInSeconds: 60
+          SizeInMBs: 5
+        CompressionFormat: UNCOMPRESSED
+        Prefix: "firehose-data/"
+        ErrorOutputPrefix: "firehose-errors/"
+
+  ## 🔹 IAM Role for Firehose to Access S3 & Kinesis
+  FirehoseIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: "FirehoseKinesisS3Role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service: "firehose.amazonaws.com"
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: "FirehoseKinesisS3Policy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "s3:PutObject"
+                Resource: !Sub "${KinesisS3Bucket.Arn}/*"
+              - Effect: "Allow"
+                Action:
+                  - "kinesis:DescribeStream"
+                  - "kinesis:GetShardIterator"
+                  - "kinesis:GetRecords"
+                Resource: !GetAtt KinesisDataStream.Arn
+
+  # --- IAM Group ---
+  MyIAMGroup:
+    Type: AWS::IAM::Group
+    Properties:
+      GroupName: MyKinesisGroup
+
+  # --- IAM Role for Group Access ---
+  MyIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: MyKinesisFirehoseS3AccessRole
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: MyKinesisFirehoseS3AccessPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - kinesis:DescribeStream
+                  - kinesis:GetShardIterator
+                  - kinesis:GetRecords
+                  - kinesis:PutRecord
+                  - kinesis:PutRecords
+                Resource: !GetAtt KinesisDataStream.Arn
+
+              - Effect: Allow
+                Action:
+                  - firehose:DescribeDeliveryStream
+                  - firehose:PutRecord
+                  - firehose:PutRecordBatch
+                Resource: !GetAtt KinesisFirehose.Arn
+
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:GetObject
+                  - s3:PutObject
+                Resource:
+                  - !Sub "arn:aws:s3:::${KinesisS3Bucket}"
+                  - !Sub "arn:aws:s3:::${KinesisS3Bucket}/*"
+
+  # --- Attach IAM Role to Group ---
+  IAMGroupPolicyAttachment:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: KinesisFirehoseS3GroupPolicy
+      Groups:
+        - !Ref MyIAMGroup
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - sts:AssumeRole
+            Resource: !GetAtt MyIAMRole.Arn
+
+Outputs:
+  S3BucketName:
+    Description: "S3 bucket for Kinesis Firehose output"
+    Value: !Ref KinesisS3Bucket
+
+  KinesisDataStreamName:
+    Description: "Name of the Kinesis Data Stream"
+    Value: !Ref KinesisDataStream
+
+  KinesisFirehoseStreamName:
+    Description: "Name of the Kinesis Firehose Stream"
+    Value: !Ref KinesisFirehose
+
+  IAMGroupName:
+    Value: !Ref MyIAMGroup
+
+  IAMRoleArn:
+    Value: !GetAtt MyIAMRole.Arn

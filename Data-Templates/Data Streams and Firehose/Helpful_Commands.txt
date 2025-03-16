@@ -1,0 +1,36 @@
+# Configure AWS credentials (if not already configured)
+# Ensure you have the necessary IAM permissions to interact with Kinesis
+aws configure
+
+# List all available Kinesis streams in the specified region
+# This helps verify that the stream was successfully created
+aws kinesis list-streams --region <AWS_REGION>
+
+# Describe details of a specific Kinesis stream
+# Provides information such as the stream status, retention period, and shard count
+aws kinesis describe-stream --stream-name <KINESIS_STREAM_NAME> --region <AWS_REGION>
+
+# Put a test record into the specified Kinesis stream
+# The record contains a JSON message with a timestamp
+# The partition key is used to determine which shard the record is assigned to
+aws kinesis put-record \
+    --stream-name <KINESIS_STREAM_NAME> \
+    --partition-key "1" \
+    --data "$(echo -n '{"message": "Hello, Kinesis!", "timestamp": "'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'"}')" \
+    --region <AWS_REGION>
+
+# Retrieve records from the stream
+# First, obtain the Shard ID from the stream
+# A Kinesis stream consists of multiple shards, each acting as a separate data channel.
+# The command below extracts the first shard's ID from the list of shards.
+SHARD_ID=$(aws kinesis list-shards --stream-name <KINESIS_STREAM_NAME> --region <AWS_REGION> --query 'Shards[0].ShardId' --output text)
+
+# Use the Shard ID to get a shard iterator
+# A shard iterator is a pointer that tells Kinesis where to start reading records from.
+# The "TRIM_HORIZON" iterator type ensures records are read from the oldest available data in the shard.
+SHARD_ITERATOR=$(aws kinesis get-shard-iterator --stream-name <KINESIS_STREAM_NAME> --shard-id $SHARD_ID --shard-iterator-type TRIM_HORIZON --region <AWS_REGION> --query 'ShardIterator' --output text)
+
+# Fetch records from the stream using the obtained shard iterator
+# This command retrieves records in batches. If there are many records, it may need to be run multiple times.
+# The response contains the actual data payload along with metadata like sequence numbers and timestamps.
+aws kinesis get-records --shard-iterator $SHARD_ITERATOR --region <AWS_REGION>

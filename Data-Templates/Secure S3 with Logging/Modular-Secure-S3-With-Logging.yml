@@ -1,0 +1,169 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CloudFormation template to create two S3 buckets, configure CloudTrail, integrate IAM policies and KMS encryption.
+
+Resources:
+  # KMS Key for encrypting S3 bucket data
+  MyKMSKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: "KMS Key for encrypting S3 bucket data"
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: 
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
+            Action: "kms:*"
+            Resource: "*"
+
+  # Log bucket for CloudTrail logs
+  LogBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${AWS::AccountId}-cloudtrail-logs-${AWS::Region}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  LogBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref LogBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          # Allow CloudTrail to write logs
+          - Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action: "s3:PutObject"
+            Resource: !Sub "arn:aws:s3:::${LogBucket}/AWSLogs/${AWS::AccountId}/*"
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Sub "${AWS::AccountId}"
+              ArnLike:
+                aws:SourceArn: !Sub "arn:aws:cloudtrail:${AWS::Region}:${AWS::AccountId}:trail/MyCloudTrail"
+
+          # Allow CloudTrail to get bucket ACL
+          - Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action: "s3:GetBucketAcl"
+            Resource: !Sub "arn:aws:s3:::${LogBucket}"
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Sub "${AWS::AccountId}"
+
+  # General data bucket with KMS encryption and logging
+  DataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${AWS::AccountId}-data-bucket-${AWS::Region}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: "aws:kms"
+              KMSMasterKeyID: !Ref MyKMSKey
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LoggingConfiguration:
+        DestinationBucketName: !Ref LogBucket
+        LogFilePrefix: "DataBucketLogs/"
+      VersioningConfiguration:
+        Status: Enabled
+
+  # CloudTrail logging setup
+  CloudTrail:
+    Type: AWS::CloudTrail::Trail
+    DependsOn: LogBucketPolicy  # Ensures policy is in place before CloudTrail starts
+    Properties:
+      TrailName: MyCloudTrail
+      S3BucketName: !Ref LogBucket
+      IncludeGlobalServiceEvents: true
+      IsLogging: true
+      IsMultiRegionTrail: true
+      EnableLogFileValidation: true
+
+  # IAM Group for CloudTrail Service and Log Bucket Access
+  CloudTrailAccessGroup:
+    Type: AWS::IAM::Group
+    Properties:
+      GroupName: CloudTrailAccessGroup
+
+  # IAM Policy for CloudTrail Service and Log Bucket Access
+  CloudTrailAccessPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: CloudTrailAccessPolicy
+      Groups:
+        - !Ref CloudTrailAccessGroup
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - "cloudtrail:DescribeTrails"
+              - "cloudtrail:GetTrailStatus"
+              - "cloudtrail:ListTrails"
+              - "cloudtrail:StartLogging"
+              - "cloudtrail:StopLogging"
+            Resource: "*"
+          - Effect: Allow
+            Action:
+              - "s3:GetObject"
+              - "s3:ListBucket"
+            Resource:
+              - !Sub "arn:aws:s3:::${LogBucket}"
+              - !Sub "arn:aws:s3:::${LogBucket}/AWSLogs/${AWS::AccountId}/*"
+
+  # IAM Group for S3 and KMS Access
+  S3KMSAccessGroup:
+    Type: AWS::IAM::Group
+    Properties:
+      GroupName: "S3AccessGroup"
+
+  # IAM Policy for S3 and KMS Access
+  S3KMSAccessPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: "S3KMSAccessPolicy"
+      Groups: 
+        - !Ref S3KMSAccessGroup
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - "s3:GetObject"
+              - "s3:PutObject"
+              - "s3:ListBucket"
+            Resource: 
+              - !Sub "arn:aws:s3:::${DataBucket}"
+              - !Sub "arn:aws:s3:::${DataBucket}/*"
+          - Effect: Allow
+            Action:
+              - "kms:Decrypt"
+              - "kms:Encrypt"
+            Resource: !GetAtt MyKMSKey.Arn
+
+Outputs:
+  LogBucketName:
+    Description: Name of the S3 bucket for CloudTrail logs
+    Value: !Ref LogBucket
+
+  DataBucketName:
+    Description: Name of the additional S3 bucket with KMS encryption
+    Value: !Ref DataBucket
+
+  CloudTrailAccessGroup:
+    Description: IAM Group with CloudTrail and LogBucket Access
+    Value: !Ref CloudTrailAccessGroup
+
+  S3KMSAccessGroup:
+    Description: IAM Group with S3 and KMS Access
+    Value: !Ref S3KMSAccessGroup
