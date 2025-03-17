@@ -1,0 +1,5 @@
+# Use these commands to mount the EFS drive
+# Locate your file system id in EFS
+mkdir -p /mnt/efs
+sudo mount -t efs -o tls <fs-My-EFS-ID>:/ /mnt/efs
+echo "<fs-My-EFS-ID>:/ /mnt/efs efs _netdev,tls 0 0" >> /etc/fstab
