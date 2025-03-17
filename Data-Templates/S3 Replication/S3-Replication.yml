@@ -1,0 +1,69 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'S3 Buckets with Cross-Region Replication'
+
+Resources:
+  # IAM Role for S3 Replication (Created First)
+  ReplicationRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: s3.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: S3ReplicationPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:ReplicateObject
+                  - s3:ReplicateDelete
+                  - s3:ReplicateTags
+                  - s3:GetObjectVersionForReplication
+                  - s3:GetObjectVersionAcl
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:GetBucketVersioning
+                Resource: "*"
+
+  # Source S3 Bucket (us-west-1)
+  SourceBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "my-source-bucket-${AWS::AccountId}"
+      VersioningConfiguration:
+        Status: Enabled
+      ReplicationConfiguration:
+        Role: !GetAtt ReplicationRole.Arn
+        Rules:
+          - Id: ReplicationRule
+            Status: Enabled
+            Destination:
+              Bucket: !Sub "arn:aws:s3:::${DestinationBucket}"
+
+  # Destination S3 Bucket (us-east-1)
+  DestinationBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "my-destination-bucket-${AWS::AccountId}"
+      VersioningConfiguration:
+        Status: Enabled
+
+Outputs:
+  SourceBucket:
+    Description: "Source S3 Bucket"
+    Value: !Ref SourceBucket
+
+  DestinationBucket:
+    Description: "Destination S3 Bucket"
+    Value: !Ref DestinationBucket
+
+  ReplicationRole:
+    Description: "IAM Role for S3 Replication"
+    Value: !GetAtt ReplicationRole.Arn
