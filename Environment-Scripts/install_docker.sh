@@ -129,3 +129,8 @@ EOF
         exit 1
     fi
 }
+
+# Run the functions
+install_docker
+configure_docker
+optimize_docker
