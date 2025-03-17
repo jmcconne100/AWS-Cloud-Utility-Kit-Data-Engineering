@@ -1,0 +1,29 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'S3 Bucket with Intelligent-Tiering and Transfer Acceleration'
+
+Resources:
+  # S3 Bucket
+  MyS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "my-intelligent-tiering-bucket-${AWS::AccountId}"
+      VersioningConfiguration:
+        Status: Enabled
+      AccelerateConfiguration:
+        AccelerationStatus: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: IntelligentTieringRule
+            Status: Enabled
+            Transitions:
+              - TransitionInDays: 30
+                StorageClass: INTELLIGENT_TIERING
+
+Outputs:
+  BucketName:
+    Description: "S3 Bucket Name"
+    Value: !Ref MyS3Bucket
+
+  TransferAccelerationURL:
+    Description: "Use this endpoint for faster uploads"
+    Value: !Sub "https://${MyS3Bucket}.s3-accelerate.amazonaws.com"

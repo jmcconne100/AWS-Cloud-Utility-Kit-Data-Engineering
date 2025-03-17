@@ -1,0 +1,23 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'S3 Bucket with Lifecycle Policy to Transition Objects to Glacier in 30 Days'
+
+Resources:
+  # S3 Bucket
+  MyS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "my-glacier-bucket-${AWS::AccountId}"
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: TransitionToGlacier
+            Status: Enabled
+            Transitions:
+              - TransitionInDays: 30
+                StorageClass: GLACIER
+
+Outputs:
+  BucketName:
+    Description: "S3 Bucket Name"
+    Value: !Ref MyS3Bucket
