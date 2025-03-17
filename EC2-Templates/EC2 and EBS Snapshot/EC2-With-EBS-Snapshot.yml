@@ -1,0 +1,191 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'VPC with Internet Gateway, Public Subnet, EC2 Instance, and EBS Snapshot Policy'
+
+Resources:
+  # VPC
+  MyVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: MyVPC
+
+  # Internet Gateway
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: MyInternetGateway
+
+  # Attach Internet Gateway to VPC
+  GatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref MyVPC
+      InternetGatewayId: !Ref InternetGateway
+
+  # Public Subnet
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MyVPC
+      CidrBlock: 10.0.1.0/24
+      MapPublicIpOnLaunch: true
+      AvailabilityZone: !Select [ 0, !GetAZs "" ]
+      Tags:
+        - Key: Name
+          Value: MyPublicSubnet
+
+  # Route Table for Public Subnet
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref MyVPC
+      Tags:
+        - Key: Name
+          Value: MyPublicRouteTable
+
+  # Route to Internet Gateway
+  PublicRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  # Associate Route Table with Public Subnet
+  PublicSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+  # Security Group for EC2 Instance
+  MySecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow SSH and HTTP
+      VpcId: !Ref MyVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: MySecurityGroup
+
+  # EC2 Instance (Root Volume Automatically Created)
+  MyEC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t2.micro
+      ImageId: ami-01eb4eefd88522422 # Update this with a valid AMI ID for your region
+      SubnetId: !Ref PublicSubnet
+      SecurityGroupIds:
+        - !Ref MySecurityGroup
+      KeyName: CloudFormationKeyPair # Ensure this key pair exists in your AWS account
+      Tags:
+        - Key: Name
+          Value: MyEC2Instance
+
+  # Additional EBS Volume (Tagged with Backup: true)
+  MyEBSVolume:
+    Type: AWS::EC2::Volume
+    Properties:
+      AvailabilityZone: !GetAtt MyEC2Instance.AvailabilityZone
+      Size: 10
+      VolumeType: gp2
+      Tags:
+        - Key: Backup
+          Value: "true"
+        - Key: Name
+          Value: MyEBSVolume
+
+  # Attach EBS Volume to EC2 Instance
+  MyVolumeAttachment:
+    Type: AWS::EC2::VolumeAttachment
+    Properties:
+      VolumeId: !Ref MyEBSVolume
+      InstanceId: !Ref MyEC2Instance
+      Device: /dev/sdf
+
+  # Amazon Data Lifecycle Manager (DLM) Policy for EBS Snapshots
+  SnapshotLifecyclePolicy:
+    Type: AWS::DLM::LifecyclePolicy
+    Properties:
+      Description: "EBS Snapshot Policy"
+      State: ENABLED
+      ExecutionRoleArn: !GetAtt SnapshotLifecycleRole.Arn
+      PolicyDetails:
+        PolicyType: EBS_SNAPSHOT_MANAGEMENT
+        ResourceTypes:
+          - VOLUME
+        TargetTags:
+          - Key: Backup
+            Value: "true"
+        Schedules:
+          - Name: "DailyBackup"
+            CreateRule:
+              Interval: 24
+              IntervalUnit: HOURS
+            RetainRule:
+              Count: 7
+            CopyTags: true
+
+  # IAM Role for DLM Policy
+  SnapshotLifecycleRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: dlm.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: DLMPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:CreateSnapshot
+                  - ec2:DescribeVolumes
+                  - ec2:DescribeSnapshots
+                  - ec2:DeleteSnapshot
+                Resource: "*"
+
+Outputs:
+  VPCId:
+    Description: "VPC ID"
+    Value: !Ref MyVPC
+
+  PublicSubnetId:
+    Description: "Public Subnet ID"
+    Value: !Ref PublicSubnet
+
+  EC2InstanceId:
+    Description: "EC2 Instance ID"
+    Value: !Ref MyEC2Instance
+
+  InternetGatewayId:
+    Description: "Internet Gateway ID"
+    Value: !Ref InternetGateway
+
+  EBSVolumeId:
+    Description: "EBS Volume ID"
+    Value: !Ref MyEBSVolume
+
+  SnapshotLifecyclePolicyId:
+    Description: "EBS Snapshot Lifecycle Policy ID"
+    Value: !Ref SnapshotLifecyclePolicy
