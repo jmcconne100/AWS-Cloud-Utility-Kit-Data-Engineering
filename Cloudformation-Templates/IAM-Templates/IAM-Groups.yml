@@ -1,0 +1,125 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "IAM Group Structure for a Large Organization"
+
+Resources:
+  # ---------------------- EXECUTIVE ROLES ----------------------
+  
+  AdminGroup:
+    Type: AWS::IAM::Group
+    Properties:
+      GroupName: "Admins"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/AdministratorAccess"
+
+  AuditorGroup:
+    Type: AWS::IAM::Group
+    Properties:
+      GroupName: "Auditors"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/SecurityAudit"
+        - "arn:aws:iam::aws:policy/job-function/ViewOnlyAccess"
+
+  # ---------------------- ENGINEERING TEAMS ----------------------
+
+  DevOpsGroup:
+    Type: AWS::IAM::Group
+    Properties:
+      GroupName: "DevOps"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/IAMFullAccess"
+        - "arn:aws:iam::aws:policy/AWSCloudFormationFullAccess"
+        - "arn:aws:iam::aws:policy/AmazonEC2FullAccess"
+        - "arn:aws:iam::aws:policy/AmazonS3FullAccess"
+
+  DevelopersGroup:
+    Type: AWS::IAM::Group
+    Properties:
+      GroupName: "Developers"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/AWSCodeDeployFullAccess"
+        - "arn:aws:iam::aws:policy/AWSLambda_FullAccess"
+        - "arn:aws:iam::aws:policy/AmazonEC2ReadOnlyAccess"
+        - "arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess"
+
+  QAGroup:
+    Type: AWS::IAM::Group
+    Properties:
+      GroupName: "QA"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/ReadOnlyAccess"
+        - "arn:aws:iam::aws:policy/AmazonEC2ReadOnlyAccess"
+
+  # ---------------------- SECURITY & COMPLIANCE ----------------------
+
+  SecurityGroup:
+    Type: AWS::IAM::Group
+    Properties:
+      GroupName: "Security"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/SecurityAudit"
+        - "arn:aws:iam::aws:policy/AmazonGuardDutyReadOnlyAccess"
+        - "arn:aws:iam::aws:policy/AWSCloudTrail_ReadOnlyAccess"
+
+  ComplianceGroup:
+    Type: AWS::IAM::Group
+    Properties:
+      GroupName: "Compliance"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/job-function/ViewOnlyAccess"
+        - "arn:aws:iam::aws:policy/AWSAuditManagerAdministratorAccess"
+
+  # ---------------------- SUPPORT & OPERATIONS ----------------------
+
+  ITSupportGroup:
+    Type: AWS::IAM::Group
+    Properties:
+      GroupName: "ITSupport"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/IAMUserChangePassword"
+        - "arn:aws:iam::aws:policy/AWSBillingReadOnlyAccess"
+        - "arn:aws:iam::aws:policy/AWSOrganizationsReadOnlyAccess"
+
+  HelpDeskGroup:
+    Type: AWS::IAM::Group
+    Properties:
+      GroupName: "HelpDesk"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/job-function/SupportUser"
+        - "arn:aws:iam::aws:policy/IAMUserChangePassword"
+
+Outputs:
+  AdminGroupARN:
+    Description: "ARN of the Admin Group"
+    Value: !GetAtt AdminGroup.Arn
+
+  AuditorGroupARN:
+    Description: "ARN of the Auditor Group"
+    Value: !GetAtt AuditorGroup.Arn
+
+  DevOpsGroupARN:
+    Description: "ARN of the DevOps Group"
+    Value: !GetAtt DevOpsGroup.Arn
+
+  DevelopersGroupARN:
+    Description: "ARN of the Developers Group"
+    Value: !GetAtt DevelopersGroup.Arn
+
+  QAGroupARN:
+    Description: "ARN of the QA Group"
+    Value: !GetAtt QAGroup.Arn
+
+  SecurityGroupARN:
+    Description: "ARN of the Security Group"
+    Value: !GetAtt SecurityGroup.Arn
+
+  ComplianceGroupARN:
+    Description: "ARN of the Compliance Group"
+    Value: !GetAtt ComplianceGroup.Arn
+
+  ITSupportGroupARN:
+    Description: "ARN of the IT Support Group"
+    Value: !GetAtt ITSupportGroup.Arn
+
+  HelpDeskGroupARN:
+    Description: "ARN of the Help Desk Group"
+    Value: !GetAtt HelpDeskGroup.Arn
