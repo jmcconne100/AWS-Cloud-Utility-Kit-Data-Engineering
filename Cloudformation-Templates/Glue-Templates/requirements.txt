@@ -1,0 +1,2 @@
+# To run this file be sure to create an s3 bucket beforehand and load the glue-hello-world.py file into that bucket
+# make sure to modify the Glue-Job-Template.yml file with the correct bucket and file name locations before running the job in cloud formation.

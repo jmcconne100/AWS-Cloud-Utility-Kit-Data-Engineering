@@ -1,0 +1,81 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "AWS Glue ETL Hello World - Writes Hello World to S3 with CloudWatch Logging"
+
+Resources:
+  # IAM Role for Glue Job
+  GlueJobRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "GlueETLHelloWorldRole-${AWS::Region}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: glue.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: GlueETLHelloWorldPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub "arn:aws:s3:::jon-scripts-bucket"
+                  - !Sub "arn:aws:s3:::jon-scripts-bucket/*"
+
+              - Effect: Allow
+                Action:
+                  - glue:CreateJob
+                  - glue:StartJobRun
+                  - glue:GetJobRun
+                  - glue:GetJobRuns
+                  - glue:GetJobs
+                  - glue:BatchStopJobRun
+                Resource: "*"
+
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "*"
+
+  # CloudWatch Log Group for Glue Job
+  GlueLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws-glue/jobs/${AWS::StackName}"
+      RetentionInDays: 7
+
+  # AWS Glue Job
+  GlueJob:
+    Type: AWS::Glue::Job
+    Properties:
+      Name: "GlueHelloWorldJob"
+      Role: !GetAtt GlueJobRole.Arn
+      Command:
+        Name: "glueetl"
+        ScriptLocation: "s3://jon-scripts-bucket/glue-hello-world.py"
+        PythonVersion: "3"
+      GlueVersion: "3.0"
+      MaxCapacity: 2.0
+      ExecutionProperty:
+        MaxConcurrentRuns: 1
+      DefaultArguments:
+        "--job-bookmark-option": "job-bookmark-disable"
+        "--TempDir": "s3://jon-scripts-bucket/temp/"
+        "--enable-continuous-cloudwatch-log": "true"
+        "--enable-metrics": "true"
+
+Outputs:
+  GlueJobName:
+    Description: "AWS Glue Job Name"
+    Value: !Ref GlueJob
+  CloudWatchLogGroup:
+    Description: "CloudWatch Log Group for Glue Job"
+    Value: !Ref GlueLogGroup
