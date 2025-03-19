@@ -1,0 +1,146 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Parameters:
+  VPCName:
+    Type: String
+    Default: "DatabaseVPC"
+
+  RDSClusterName:
+    Type: String
+    Default: "my-rds-cluster"
+
+  RDSDatabaseName:
+    Type: String
+    Default: "myrdsdb"
+
+  RDSMasterUsername:
+    Type: String
+    Default: "admin"
+    NoEcho: true
+
+  RDSMasterPassword:
+    Type: String
+    NoEcho: true
+    MinLength: 8
+    MaxLength: 64
+    AllowedPattern: "^[a-zA-Z0-9!@#$%^&*()_+=-]*$"
+    Description: "RDS master password (must be 8-64 characters, no spaces)"
+
+  RDSEngine:
+    Type: String
+    Default: "mysql"
+    AllowedValues: ["mysql", "postgres", "mariadb", "aurora-mysql", "aurora-postgresql"]
+
+  RDSInstanceType:
+    Type: String
+    Default: "db.t3.medium"
+
+Resources:
+  DatabaseVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Ref VPCName
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref DatabaseVPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnet1A:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref DatabaseVPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: us-west-1a
+      MapPublicIpOnLaunch: true
+
+  PublicSubnet1C:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref DatabaseVPC
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: us-west-1c
+      MapPublicIpOnLaunch: true
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref DatabaseVPC
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetRouteTableAssociation1A:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1A
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnetRouteTableAssociation1C:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1C
+      RouteTableId: !Ref PublicRouteTable
+
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow RDS access
+      VpcId: !Ref DatabaseVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          CidrIp: 0.0.0.0/0
+
+  RDSSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: "Subnet Group for RDS"
+      SubnetIds:
+        - !Ref PublicSubnet1A
+        - !Ref PublicSubnet1C
+
+  RDSSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "${RDSClusterName}-credentials"
+      Description: "Credentials for RDS Instance"
+      SecretString:
+        !Sub |
+          {
+            "username": "${RDSMasterUsername}",
+            "password": "${RDSMasterPassword}"
+          }
+
+  RDSInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: !Ref RDSClusterName
+      DBName: !Ref RDSDatabaseName
+      Engine: !Ref RDSEngine
+      DBInstanceClass: !Ref RDSInstanceType
+      AllocatedStorage: 20
+      MasterUsername: !Sub "{{resolve:secretsmanager:${RDSSecret}:SecretString:username}}"
+      MasterUserPassword: !Sub "{{resolve:secretsmanager:${RDSSecret}:SecretString:password}}"
+      VPCSecurityGroups:
+        - !Ref RDSSecurityGroup
+      DBSubnetGroupName: !Ref RDSSubnetGroup
+      MultiAZ: true
+      PubliclyAccessible: true
+      StorageType: gp2
+      BackupRetentionPeriod: 7
+

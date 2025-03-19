@@ -1,0 +1,197 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Parameters:
+  VPCName:
+    Type: String
+    Default: "DatabaseVPC"
+
+  RDSClusterName:
+    Type: String
+    Default: "my-aurora-cluster"
+
+  RDSDatabaseName:
+    Type: String
+    Default: "mypgdb"
+
+  RDSMasterUsername:
+    Type: String
+    Default: "postgresadmin"
+    NoEcho: true
+
+  RDSMasterPassword:
+    Type: String
+    NoEcho: true
+    MinLength: 8
+    MaxLength: 64
+    AllowedPattern: "^[a-zA-Z0-9!@#$%^&*()_+=-]*$"
+    Description: "Aurora PostgreSQL master password (8-64 characters, no spaces)"
+
+  MinCapacity:
+    Type: Number
+    Default: 0.5
+    Description: "Minimum Aurora Serverless v2 capacity (ACUs)"
+
+  MaxCapacity:
+    Type: Number
+    Default: 4
+    Description: "Maximum Aurora Serverless v2 capacity (ACUs)"
+
+Resources:
+  DatabaseVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Ref VPCName
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref DatabaseVPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnet1A:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref DatabaseVPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: us-west-1a
+      MapPublicIpOnLaunch: true
+
+  PublicSubnet1C:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref DatabaseVPC
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: us-west-1c
+      MapPublicIpOnLaunch: true
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref DatabaseVPC
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetRouteTableAssociation1A:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1A
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnetRouteTableAssociation1C:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1C
+      RouteTableId: !Ref PublicRouteTable
+
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow Aurora PostgreSQL access
+      VpcId: !Ref DatabaseVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          CidrIp: 0.0.0.0/0  # Restrict this in production
+
+  RDSSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: "Subnet Group for Aurora Serverless v2"
+      SubnetIds:
+        - !Ref PublicSubnet1A
+        - !Ref PublicSubnet1C
+
+  AuroraParameterGroup:
+    Type: AWS::RDS::DBClusterParameterGroup
+    Properties:
+      Description: "Parameter group for Aurora PostgreSQL 16"
+      Family: aurora-postgresql16
+      Parameters:
+        rds.force_ssl: 1  # Forces SSL connections
+
+  RDSSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "${RDSClusterName}-credentials"
+      Description: "Credentials for Aurora Serverless v2 PostgreSQL"
+      SecretString:
+        !Sub |
+          {
+            "username": "${RDSMasterUsername}",
+            "password": "${RDSMasterPassword}"
+          }
+
+  AuroraServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: AuroraServiceRole
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+                - glue.amazonaws.com
+                - ecs-tasks.amazonaws.com
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: AuroraServicePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "rds:DescribeDBClusters"
+                  - "rds:DescribeDBInstances"
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - "secretsmanager:GetSecretValue"
+                Resource: 
+                  - !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${RDSClusterName}-credentials-*"
+              - Effect: Allow
+                Action:
+                  - "rds-db:connect"
+                Resource: 
+                  - !Sub "arn:aws:rds-db:${AWS::Region}:${AWS::AccountId}:dbuser/${RDSClusterName}/postgresadmin"
+
+
+  AuroraCluster:
+    Type: AWS::RDS::DBCluster
+    Properties:
+      DBClusterIdentifier: !Ref RDSClusterName
+      Engine: aurora-postgresql
+      EngineMode: provisioned
+      DBSubnetGroupName: !Ref RDSSubnetGroup
+      VpcSecurityGroupIds:
+        - !Ref RDSSecurityGroup
+      MasterUsername: !Sub "{{resolve:secretsmanager:${RDSSecret}:SecretString:username}}"
+      MasterUserPassword: !Sub "{{resolve:secretsmanager:${RDSSecret}:SecretString:password}}"
+      BackupRetentionPeriod: 7
+      StorageEncrypted: true
+      DBClusterParameterGroupName: !Ref AuroraParameterGroup
+      ServerlessV2ScalingConfiguration:
+        MinCapacity: !Ref MinCapacity
+        MaxCapacity: !Ref MaxCapacity
+      EnableIAMDatabaseAuthentication: true
+
+Outputs:
+  AuroraClusterEndpoint:
+    Description: "Aurora Serverless v2 PostgreSQL Cluster Endpoint"
+    Value: !GetAtt AuroraCluster.Endpoint.Address
