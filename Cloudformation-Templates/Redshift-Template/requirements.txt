@@ -1,0 +1,3 @@
+# Please remember that the password for a Redshift cluster should be over 8 characters in this template
+# It also should include a number and special characters
+# Redshift may require it as part of the cloudformation stack process
