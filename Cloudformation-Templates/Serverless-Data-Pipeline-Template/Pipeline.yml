@@ -346,7 +346,7 @@ Outputs:
   GlueJobName:
     Description: "AWS Glue Job Name"
     Value: !Ref GlueJob
-    
+
   CloudWatchLogGroup:
     Description: "CloudWatch Log Group for Glue Job"
     Value: !Ref GlueLogGroup
