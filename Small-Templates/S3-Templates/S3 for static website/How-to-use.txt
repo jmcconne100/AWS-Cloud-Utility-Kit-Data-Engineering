@@ -1,0 +1,6 @@
+How to Deploy with a Domain Name
+
+Go to AWS CloudFormation → Click "Create Stack" → "With new resources."
+Upload your CloudFormation template.
+Under "Parameters," enter your domain name (e.g., yourwebsite.com).
+Click "Next" and proceed with stack creation.
