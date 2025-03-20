@@ -1,0 +1,99 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: "CloudFormation template for hosting a static website with www redirection."
+
+Parameters:  
+  CloudFrontDistributionId:
+    Type: String
+    Description: "Enter the existing CloudFront Distribution ID"
+
+Resources:
+  InvalidateCacheLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/InvalidateCacheLambda"
+      RetentionInDays: 14
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-LambdaExecutionRole"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service: "lambda.amazonaws.com"
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: "LambdaCloudWatchLogging"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/InvalidateCacheLambda:*"
+        - PolicyName: "LambdaCloudFrontInvalidation"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "cloudfront:CreateInvalidation"
+                  - "cloudfront:GetInvalidation"
+                Resource: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistributionId}"
+  
+
+  InvalidateCacheLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: "InvalidateCache"
+      Runtime: "python3.9"
+      Handler: "index.lambda_handler"
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          DISTRIBUTION_ID: !Ref CloudFrontDistributionId
+      Code:
+        ZipFile: |
+          import boto3
+          import os
+          import logging
+          import time
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def lambda_handler(event, context):
+              client = boto3.client("cloudfront")
+              distribution_id = os.environ["DISTRIBUTION_ID"]
+
+              caller_reference = str(int(time.time()))  # UNIX timestamp
+
+              try:
+                  response = client.create_invalidation(
+                      DistributionId=distribution_id,
+                      InvalidationBatch={
+                          "Paths": {
+                              "Quantity": 1,
+                              "Items": ["/*"]
+                          },
+                          "CallerReference": caller_reference
+                      }
+                  )
+
+                  logger.info(f"Cache invalidation successful for {distribution_id}: {response}")
+
+                  return {
+                      "statusCode": 200,
+                      "body": f"Cache invalidation triggered for {distribution_id}"
+                  }
+              
+              except Exception as e:
+                  logger.error(f"Error invalidating cache for {distribution_id}: {str(e)}")
+                  return {
+                      "statusCode": 500,
+                      "body": f"Failed to invalidate cache: {str(e)}"}
+
