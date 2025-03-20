@@ -1,0 +1,85 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Resources:
+  # ✅ S3 Bucket for Redshift Data Storage (Unique Bucket Name)
+  RedshiftS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "multipart-s3-bucket-${AWS::AccountId}"  # FIXED
+      AccessControl: Private
+      AccelerateConfiguration:
+        AccelerationStatus: Enabled
+
+  # ✅ IAM Role for Allowed Users
+  S3UploadRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: S3MultipartUploadRole
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action: "sts:AssumeRole"
+
+  # ✅ Attach an IAM Policy to the Role (No Principals Allowed)
+  S3UploadPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: S3MultipartUploadPolicy
+      Roles:
+        - !Ref S3UploadRole
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          # ✅ Deny Single-Part Uploads Over 5MB
+          - Effect: Deny
+            Action: "s3:PutObject"
+            Resource: !Sub "arn:aws:s3:::${RedshiftS3Bucket}/*"  # FIXED
+            Condition:
+              NumericGreaterThan:
+                s3:ContentLength: 5242880
+              StringNotEqualsIfExists:
+                s3:x-amz-metadata-directive: "REPLACE"
+
+          # ✅ Allow Multipart Uploads
+          - Effect: Allow
+            Action:
+              - "s3:InitiateMultipartUpload"
+              - "s3:UploadPart"
+              - "s3:CompleteMultipartUpload"
+              - "s3:AbortMultipartUpload"
+            Resource: !Sub "arn:aws:s3:::${RedshiftS3Bucket}/*"  # FIXED
+
+  # ✅ S3 Bucket Policy to Enforce Role-Based Access and Root User Access
+  RedshiftS3BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    DependsOn: RedshiftS3Bucket
+    Properties:
+      Bucket: !Ref RedshiftS3Bucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          # ✅ Allow Root User Full Access
+          - Effect: Allow
+            Action: "s3:*"
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Resource:
+              - !Sub "arn:aws:s3:::${RedshiftS3Bucket}"
+              - !Sub "arn:aws:s3:::${RedshiftS3Bucket}/*"
+
+          # ✅ Deny Access to Anyone Who is NOT Using the Specific Role (EXCEPT ROOT)
+          - Effect: Deny
+            Action: "s3:*"
+            Principal: "*"
+            Resource:
+              - !Sub "arn:aws:s3:::${RedshiftS3Bucket}"
+              - !Sub "arn:aws:s3:::${RedshiftS3Bucket}/*"
+            Condition:
+              StringNotEqualsIfExists:
+                aws:PrincipalArn:
+                  - !Sub "arn:aws:iam::${AWS::AccountId}:root"  # ✅ EXEMPT ROOT
+                  - !Sub "arn:aws:iam::${AWS::AccountId}:role/S3MultipartUploadRole"
+
