@@ -1,0 +1,97 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: EC2 Auto Scheduler with Lambda + EventBridge
+
+Resources:
+
+  SchedulerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: EC2SchedulerLambdaRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: EC2SchedulerPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeInstances
+                  - ec2:StartInstances
+                  - ec2:StopInstances
+                  - ec2:CreateTags
+                  - ec2:DeleteTags
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "*"
+
+  SchedulerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: EC2ScheduleHandler
+      Runtime: python3.12
+      Role: !GetAtt SchedulerRole.Arn
+      Timeout: 30
+      Handler: index.lambda_handler
+      Code:
+        ZipFile: |
+          import boto3
+          from datetime import datetime
+          import pytz
+
+          WORK_START = 8
+          WORK_END = 18
+          WORK_DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
+          TIMEZONE = 'US/Pacific'
+
+          def get_tag(tags, key):
+              for tag in tags or []:
+                  if tag['Key'] == key:
+                      return tag['Value']
+              return None
+
+          def lambda_handler(event, context):
+              ec2 = boto3.resource('ec2')
+              now = datetime.now(pytz.timezone(TIMEZONE))
+              hr, day = now.hour, now.strftime('%A')
+              within_hours = (day in WORK_DAYS) and (WORK_START <= hr < WORK_END)
+
+              for inst in ec2.instances.all():
+                  schedule = get_tag(inst.tags, 'Schedule')
+                  if schedule != 'WorkHours':
+                      continue
+
+                  state = inst.state['Name']
+                  if within_hours and state == 'stopped':
+                      print(f"Starting {inst.id}")
+                      inst.start()
+                  elif not within_hours and state == 'running':
+                      print(f"Stopping {inst.id}")
+                      inst.stop()
+
+  SchedulerRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: EC2SchedulerRule
+      ScheduleExpression: cron(0 * * * ? *)
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt SchedulerFunction.Arn
+          Id: TargetLambda
+
+  LambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref SchedulerFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt SchedulerRule.Arn
