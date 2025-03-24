@@ -1,0 +1,212 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Resources:
+
+  # EventBridge Bus (uses default bus)
+  # Not explicitly defined; rules attach to default bus
+
+  # SQS Queues
+  HighPriorityQueue:
+    Type: AWS::SQS::Queue
+
+  LowPriorityQueue:
+    Type: AWS::SQS::Queue
+
+  # S3 Buckets
+  HighPriorityBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: "high-priority-pub-sub-bucket"
+
+  LowPriorityBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: "low-priority-pub-sub-bucket"
+
+  # Lambda Execution Role
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: LambdaPermissions
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:*
+                  - events:PutEvents
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - sqs:*
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                Resource:
+                  - !Sub "${HighPriorityBucket.Arn}/*"
+                  - !Sub "${LowPriorityBucket.Arn}/*"
+
+  # Lambda Publisher
+  PublisherLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Runtime: python3.11
+      Timeout: 10
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import random
+
+          client = boto3.client('events')
+
+          def handler(event, context):
+              priority = random.choice(["high", "low"])
+              print(f"Publishing message with priority: {priority}")
+
+              client.put_events(
+                  Entries=[
+                      {
+                          'Source': 'app.publisher',
+                          'DetailType': 'DataEvent',
+                          'Detail': json.dumps({
+                              'priority': priority,
+                              'message': 'Hello from the publisher'
+                          })
+                      }
+                  ]
+              )
+              return {"status": "sent", "priority": priority}
+
+  # High Priority Lambda
+  HighPriorityLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Runtime: python3.11
+      Timeout: 10
+      Code:
+        ZipFile: |
+          import json, boto3, os
+
+          s3 = boto3.client('s3')
+
+          def handler(event, context):
+              for record in event['Records']:
+                  body = json.loads(record['body'])
+                  s3.put_object(
+                      Bucket=os.environ['BUCKET'],
+                      Key="high-message.json",
+                      Body=json.dumps(body)
+                  )
+
+      Environment:
+        Variables:
+          BUCKET: !Ref HighPriorityBucket
+
+  # Low Priority Lambda
+  LowPriorityLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Runtime: python3.11
+      Timeout: 10
+      Code:
+        ZipFile: |
+          import json, boto3, os
+
+          s3 = boto3.client('s3')
+
+          def handler(event, context):
+              for record in event['Records']:
+                  body = json.loads(record['body'])
+                  s3.put_object(
+                      Bucket=os.environ['BUCKET'],
+                      Key="low-message.json",
+                      Body=json.dumps(body)
+                  )
+
+      Environment:
+        Variables:
+          BUCKET: !Ref LowPriorityBucket
+
+  # EventBridge Rules
+  HighPriorityRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: HighPriorityRule
+      EventPattern:
+        source: ["app.publisher"]
+        detail-type: ["DataEvent"]
+        detail:
+          priority: ["high"]
+      Targets:
+        - Arn: !GetAtt HighPriorityQueue.Arn
+          Id: "HighQueueTarget"
+
+  LowPriorityRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: LowPriorityRule
+      EventPattern:
+        source: ["app.publisher"]
+        detail-type: ["DataEvent"]
+        detail:
+          priority: ["low"]
+      Targets:
+        - Arn: !GetAtt LowPriorityQueue.Arn
+          Id: "LowQueueTarget"
+
+  # Permissions for EventBridge to Send to SQS
+  HighQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues: [!Ref HighPriorityQueue]
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal: "*"
+            Action: sqs:SendMessage
+            Resource: !GetAtt HighPriorityQueue.Arn
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !GetAtt HighPriorityRule.Arn
+
+  LowQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues: [!Ref LowPriorityQueue]
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal: "*"
+            Action: sqs:SendMessage
+            Resource: !GetAtt LowPriorityQueue.Arn
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !GetAtt LowPriorityRule.Arn
+
+  # Event Source Mappings (SQS to Lambda)
+  HighLambdaEventSource:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn: !GetAtt HighPriorityQueue.Arn
+      FunctionName: !Ref HighPriorityLambda
+      BatchSize: 1
+
+  LowLambdaEventSource:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn: !GetAtt LowPriorityQueue.Arn
+      FunctionName: !Ref LowPriorityLambda
+      BatchSize: 1
