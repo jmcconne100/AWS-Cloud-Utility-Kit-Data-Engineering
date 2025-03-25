@@ -1,19 +1,13 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Saga Pattern using Step Functions, Lambda, and S3
+Description: Saga Pattern with Compensation Step (S3 cleanup on failure)
 
 Resources:
 
-  #############################
-  # S3 Bucket
-  #############################
   SagaOutputBucket:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: "saga-pattern-bucket-for-jon"
 
-  #############################
-  # IAM Role for Lambdas and Step Functions
-  #############################
   SagaLambdaRole:
     Type: AWS::IAM::Role
     Properties:
@@ -31,6 +25,7 @@ Resources:
                 Action:
                   - logs:*
                   - s3:PutObject
+                  - s3:DeleteObject
                 Resource: "*"
 
   SagaStateMachineRole:
@@ -50,9 +45,6 @@ Resources:
                 Action: lambda:InvokeFunction
                 Resource: "*"
 
-  #############################
-  # Lambda: Generate Step
-  #############################
   GenerateDataLambda:
     Type: AWS::Lambda::Function
     Properties:
@@ -69,9 +61,6 @@ Resources:
                   "value": random.choice(["alpha", "beta", "gamma"])
               }
 
-  #############################
-  # Lambda: Transform Step
-  #############################
   TransformDataLambda:
     Type: AWS::Lambda::Function
     Properties:
@@ -85,9 +74,6 @@ Resources:
               event['value'] = event['value'].upper()
               return event
 
-  #############################
-  # Lambda: Store to S3
-  #############################
   StoreToS3Lambda:
     Type: AWS::Lambda::Function
     Properties:
@@ -103,16 +89,37 @@ Resources:
           s3 = boto3.client('s3')
           def handler(event, context):
               key = f"result-{event['id']}.json"
+              if event.get('force_fail'):
+                  raise Exception("Forced failure for test")
               s3.put_object(
                   Bucket=os.environ['BUCKET'],
                   Key=key,
                   Body=json.dumps(event)
               )
-              return {"status": "written", "key": key}
+              event['written_key'] = key
+              return event
 
-  #############################
-  # Step Function Definition
-  #############################
+  CompensationLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.11
+      Handler: index.handler
+      Role: !GetAtt SagaLambdaRole.Arn
+      Environment:
+        Variables:
+          BUCKET: !Ref SagaOutputBucket
+      Code:
+        ZipFile: |
+          import json, os, boto3
+          s3 = boto3.client('s3')
+          def handler(event, context):
+              key = event.get('written_key') or f"result-{event['id']}.json"
+              try:
+                  s3.delete_object(Bucket=os.environ['BUCKET'], Key=key)
+                  return {"status": "compensated", "deleted_key": key}
+              except Exception as e:
+                  return {"status": "compensation_failed", "reason": str(e)}
+
   SagaStateMachine:
     Type: AWS::StepFunctions::StateMachine
     Properties:
@@ -120,7 +127,7 @@ Resources:
       DefinitionString:
         !Sub |
           {
-            "Comment": "Saga Pattern: Generate -> Transform -> Store",
+            "Comment": "Saga Pattern with Compensation",
             "StartAt": "Generate",
             "States": {
               "Generate": {
@@ -136,16 +143,27 @@ Resources:
               "Store": {
                 "Type": "Task",
                 "Resource": "${StoreToS3Lambda.Arn}",
+                "Catch": [
+                  {
+                    "ErrorEquals": ["States.ALL"],
+                    "Next": "Compensate"
+                  }
+                ],
+                "End": true
+              },
+              "Compensate": {
+                "Type": "Task",
+                "Resource": "${CompensationLambda.Arn}",
                 "End": true
               }
             }
           }
 
 Outputs:
-  StateMachineName:
-    Description: Saga Step Function Name
+  SagaStateMachine:
+    Description: The Step Function State Machine with Compensation
     Value: !Ref SagaStateMachine
 
-  S3OutputBucket:
-    Description: S3 bucket where final output is stored
+  SagaOutputBucket:
+    Description: S3 Bucket for storing and deleting files
     Value: !Ref SagaOutputBucket
