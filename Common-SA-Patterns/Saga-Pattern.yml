@@ -1,0 +1,151 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Saga Pattern using Step Functions, Lambda, and S3
+
+Resources:
+
+  #############################
+  # S3 Bucket
+  #############################
+  SagaOutputBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: "saga-pattern-bucket-for-jon"
+
+  #############################
+  # IAM Role for Lambdas and Step Functions
+  #############################
+  SagaLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: SagaLambdaPermissions
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:*
+                  - s3:PutObject
+                Resource: "*"
+
+  SagaStateMachineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: StepFunctionInvokePolicy
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: "*"
+
+  #############################
+  # Lambda: Generate Step
+  #############################
+  GenerateDataLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.11
+      Handler: index.handler
+      Role: !GetAtt SagaLambdaRole.Arn
+      Code:
+        ZipFile: |
+          import json
+          import random
+          def handler(event, context):
+              return {
+                  "id": random.randint(1000, 9999),
+                  "value": random.choice(["alpha", "beta", "gamma"])
+              }
+
+  #############################
+  # Lambda: Transform Step
+  #############################
+  TransformDataLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.11
+      Handler: index.handler
+      Role: !GetAtt SagaLambdaRole.Arn
+      Code:
+        ZipFile: |
+          import json
+          def handler(event, context):
+              event['value'] = event['value'].upper()
+              return event
+
+  #############################
+  # Lambda: Store to S3
+  #############################
+  StoreToS3Lambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.11
+      Handler: index.handler
+      Role: !GetAtt SagaLambdaRole.Arn
+      Environment:
+        Variables:
+          BUCKET: !Ref SagaOutputBucket
+      Code:
+        ZipFile: |
+          import json, os, boto3
+          s3 = boto3.client('s3')
+          def handler(event, context):
+              key = f"result-{event['id']}.json"
+              s3.put_object(
+                  Bucket=os.environ['BUCKET'],
+                  Key=key,
+                  Body=json.dumps(event)
+              )
+              return {"status": "written", "key": key}
+
+  #############################
+  # Step Function Definition
+  #############################
+  SagaStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      RoleArn: !GetAtt SagaStateMachineRole.Arn
+      DefinitionString:
+        !Sub |
+          {
+            "Comment": "Saga Pattern: Generate -> Transform -> Store",
+            "StartAt": "Generate",
+            "States": {
+              "Generate": {
+                "Type": "Task",
+                "Resource": "${GenerateDataLambda.Arn}",
+                "Next": "Transform"
+              },
+              "Transform": {
+                "Type": "Task",
+                "Resource": "${TransformDataLambda.Arn}",
+                "Next": "Store"
+              },
+              "Store": {
+                "Type": "Task",
+                "Resource": "${StoreToS3Lambda.Arn}",
+                "End": true
+              }
+            }
+          }
+
+Outputs:
+  StateMachineName:
+    Description: Saga Step Function Name
+    Value: !Ref SagaStateMachine
+
+  S3OutputBucket:
+    Description: S3 bucket where final output is stored
+    Value: !Ref SagaOutputBucket
