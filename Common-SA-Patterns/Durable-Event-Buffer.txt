@@ -1,0 +1,145 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Durable Event Buffer using S3 + SQS Fan-Out
+
+Resources:
+
+  ###############################################
+  # S3 Bucket to Persist All Incoming Events
+  ###############################################
+  DurableEventBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub durable-event-buffer-${AWS::AccountId}-${AWS::Region}
+
+  ###############################################
+  # EventBridge Bus for Ingesting Events
+  ###############################################
+  DurableEventBus:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name: durable-event-bus
+
+  ###############################################
+  # IAM Role for S3 Writer Lambda
+  ###############################################
+  S3WriterRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: AllowS3WriteLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - s3:PutObject
+                Resource: '*'
+
+  ###############################################
+  # Lambda Function - Write All Events to S3
+  ###############################################
+  S3BufferLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.11
+      Handler: index.lambda_handler
+      Timeout: 10
+      Role: !GetAtt S3WriterRole.Arn
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref DurableEventBucket
+      Code:
+        ZipFile: |
+          import boto3, os, uuid, json, datetime
+          s3 = boto3.client('s3')
+          def lambda_handler(event, context):
+              key = f"raw-events/{datetime.datetime.utcnow().isoformat()}_{uuid.uuid4().hex}.json"
+              s3.put_object(
+                  Bucket=os.environ['BUCKET_NAME'],
+                  Key=key,
+                  Body=json.dumps(event).encode('utf-8')
+              )
+              print(f"Buffered event written to {key}")
+
+  ###############################################
+  # EventBridge Rule to Route to S3 Writer
+  ###############################################
+  BufferRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: DurableEventBufferRule
+      EventBusName: !Ref DurableEventBus
+      EventPattern:
+        source: ["buffer.source"]
+      Targets:
+        - Id: BufferToS3Lambda
+          Arn: !GetAtt S3BufferLambda.Arn
+
+  ###############################################
+  # Permission for EventBridge to Invoke Lambda
+  ###############################################
+  LambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref S3BufferLambda
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt BufferRule.Arn
+
+  ###############################################
+  # SQS Queue for Fan-Out
+  ###############################################
+  BufferFanoutQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: durable-fanout-queue
+
+  ###############################################
+  # Rule to Send Events to SQS
+  ###############################################
+  SQSRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: DurableEventQueueFanout
+      EventBusName: !Ref DurableEventBus
+      EventPattern:
+        source: ["buffer.source"]
+      Targets:
+        - Id: SendToQueue
+          Arn: !GetAtt BufferFanoutQueue.Arn
+
+  QueuePermission:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref BufferFanoutQueue
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowEventBridgeSend
+            Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sqs:SendMessage
+            Resource: !GetAtt BufferFanoutQueue.Arn
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !GetAtt SQSRule.Arn
+
+Outputs:
+  DurableBucket:
+    Value: !Ref DurableEventBucket
+  FanoutQueueURL:
+    Value: !Ref BufferFanoutQueue
+  DurableEventBus:
+    Value: !Ref DurableEventBus

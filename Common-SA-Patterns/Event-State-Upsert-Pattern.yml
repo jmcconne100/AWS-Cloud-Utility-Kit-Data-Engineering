@@ -1,0 +1,106 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Event-Carried State with Idempotent Upserts (DynamoDB Target)
+
+Resources:
+
+  ###############################################
+  # DynamoDB Target Table (Upsert Target)
+  ###############################################
+  EventStateTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: event-state-target-table
+      AttributeDefinitions:
+        - AttributeName: event_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: event_id
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+
+  ###############################################
+  # SQS Queue Carrying Event-Carried State
+  ###############################################
+  EventStateQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: event-state-queue
+
+  ###############################################
+  # IAM Role for Lambda to Read SQS and Write to DynamoDB
+  ###############################################
+  UpsertLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: UpsertLambdaPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - dynamodb:PutItem
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Resource: !GetAtt EventStateQueue.Arn
+
+  ###############################################
+  # Lambda for Idempotent Upsert
+  ###############################################
+  EventUpsertLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.11
+      Handler: index.lambda_handler
+      Timeout: 10
+      Role: !GetAtt UpsertLambdaRole.Arn
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref EventStateTable
+      Code:
+        ZipFile: |
+          import boto3, os, json
+          ddb = boto3.resource('dynamodb')
+          table = ddb.Table(os.environ['TABLE_NAME'])
+
+          def lambda_handler(event, context):
+              for record in event['Records']:
+                  body = json.loads(record['body'])
+                  # Use event_id as dedup key
+                  table.put_item(Item=body)
+              return {"status": "processed", "count": len(event['Records'])}
+
+  ###############################################
+  # Event Source Mapping - SQS → Lambda
+  ###############################################
+  EventSourceMapping:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      BatchSize: 10
+      Enabled: true
+      EventSourceArn: !GetAtt EventStateQueue.Arn
+      FunctionName: !Ref EventUpsertLambda
+      MaximumBatchingWindowInSeconds: 5
+
+Outputs:
+  EventQueueUrl:
+    Value: !Ref EventStateQueue
+  TargetTableName:
+    Value: !Ref EventStateTable
+  LambdaFunction:
+    Value: !Ref EventUpsertLambda
+    Description: Lambda that performs idempotent upserts into DynamoDB
