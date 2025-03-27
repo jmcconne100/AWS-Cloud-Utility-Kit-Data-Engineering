@@ -41,7 +41,12 @@ This project is actively maintained as a living portfolio to explore cloud-nativ
 │    ├── load-leveler-dlq/ 
 │    ├── outbox-dynamodb/ 
 │    ├── fan-out/ 
-│    ├── saga/ 
+│    ├── saga/
+│    ├── durable-event-buffer/ 
+│    ├── event-state-upsert-pattern/ 
+│    ├── eventbridge-replay/ 
+│    ├── lakehouse-fanout-pattern/ 
+│    ├── outbox-pattern/ 
 │    └── pub-sub/ 
 │ 
 ├── common-sql-problems/ 
