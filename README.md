@@ -15,7 +15,7 @@ This project is actively maintained as a living portfolio to explore cloud-nativ
 
 ## Included Repositories
 
-### [AWS Data Engineer CLI](https://github.com/jmcconne100/AWS-CLI-Tool) [https://github.com/jmcconne100/AWS-CLI-Tool](https://github.com/jmcconne100/AWS-CLI-Tool)
+### [AWS Data Engineer CLI](https://github.com/jmcconne100/AWS-CLI-Tool) - [https://github.com/jmcconne100/AWS-CLI-Tool](https://github.com/jmcconne100/AWS-CLI-Tool)
 A CloudShell-ready command-line tool for AWS data engineers.  
 Includes common admin tasks like:
 - Monitoring EC2, EBS, Security Groups, VPC's, Tags
@@ -25,7 +25,7 @@ Includes common admin tasks like:
 
 ---
 
-### [AWS SA Patterns – CloudFormation](https://github.com/jmcconne100/SA-Patterns)[https://github.com/jmcconne100/SA-Patterns](https://github.com/jmcconne100/SA-Patterns)
+### [AWS SA Patterns – CloudFormation](https://github.com/jmcconne100/SA-Patterns) - [https://github.com/jmcconne100/SA-Patterns](https://github.com/jmcconne100/SA-Patterns)
 A collection of deployable **Solutions Architecture patterns** in CloudFormation.  
 Includes modular, production-aware templates for:
 - Durable-Event-Buffer.yml
@@ -41,7 +41,7 @@ Includes modular, production-aware templates for:
 
 ---
 
-### [CloudFormation Resource Template Library](https://github.com/jmcconne100/Cloud-Formation-Resource-Portfolio)[https://github.com/jmcconne100/Cloud-Formation-Resource-Portfolio](https://github.com/jmcconne100/Cloud-Formation-Resource-Portfolio)
+### [CloudFormation Resource Template Library](https://github.com/jmcconne100/Cloud-Formation-Resource-Portfolio) - [https://github.com/jmcconne100/Cloud-Formation-Resource-Portfolio](https://github.com/jmcconne100/Cloud-Formation-Resource-Portfolio)
 A reusable library of single-resource or small-scope CloudFormation templates.  
 Useful for bootstrapping:
 - IAM roles/policies
@@ -56,7 +56,7 @@ Useful for bootstrapping:
 
 ---
 
-### [Data Engineering Scripts, Algorithms & Wrappers](https://github.com/jmcconne100/Common-Problems-And-DSAs)[https://github.com/jmcconne100/Common-Problems-And-DSAs](https://github.com/jmcconne100/Common-Problems-And-DSAs)
+### [Data Engineering Scripts, Algorithms & Wrappers](https://github.com/jmcconne100/Common-Problems-And-DSAs) - [https://github.com/jmcconne100/Common-Problems-And-DSAs](https://github.com/jmcconne100/Common-Problems-And-DSAs)
 A collection of useful Python, SQL, and Glue-related scripts including:
 - Custom ETL functions for AWS Glue
 - Algorithmic utilities (e.g., deduplication, schema comparison)
